@@ -625,6 +625,14 @@ impl ExportSettings {
         if self.audio.sample_rate.is_some_and(|rate| rate == 0 || rate > 384_000) {
             return Err(ExportError::Unsupported("output sample rate must be between 1 and 384000 Hz".into()));
         }
+        if self.audio.float && self.audio.bits != 32 {
+            return Err(ExportError::Unsupported("floating-point audio is 32-bit: set the sample size to 32".into()));
+        }
+        let sample_format = self.audio.sample_format();
+        if (self.has_audio() || self.format.is_audio_only()) && self.audio_codec() != AudioCodec::Aac && !self.supports_sample_format(sample_format) {
+            let codec = if self.audio_codec() == AudioCodec::Flac { "FLAC" } else { self.format.label() };
+            return Err(ExportError::Unsupported(format!("{codec} audio has no {} samples: choose 16, 24 or 32 bit", sample_format.label())));
+        }
         if self.field_order != FieldOrder::Progressive && self.has_video() {
             return Err(ExportError::Unsupported(format!("{} field order: FilmCraft's encoders write progressive frames", self.field_order.label())));
         }
@@ -1108,19 +1116,19 @@ impl AudioEncoder for AacEncoder {
 /// FLAC (our encoder) in MP4 / QuickTime: one frame of 4096 samples per access unit.
 pub(crate) struct FlacAudio {
     enc: filmcraft_flac::Encoder,
-    bits: u16,
+    format: SampleFormat,
     /// Samples of the frame `flush` returns (shorter than a full block).
     tail: u32,
 }
 
 impl FlacAudio {
     pub(crate) fn new(sample_rate: u32, channels: u32, s: &ExportSettings) -> Result<Self> {
-        let bits = if s.audio.bits >= 24 { 24 } else { 16 };
+        let format = s.audio.sample_format();
         let ch = u8::try_from(channels).map_err(|_| ExportError::Unsupported("FLAC: too many audio channels".into()))?;
-        let mut cfg = filmcraft_flac::EncoderConfig::new(sample_rate, ch, bits as u8);
+        let mut cfg = filmcraft_flac::EncoderConfig::new(sample_rate, ch, format.bits() as u8);
         cfg.level = s.audio.flac_level.min(8);
         let enc = filmcraft_flac::Encoder::new(cfg).map_err(|e| ExportError::Unsupported(format!("FLAC: {e}")))?;
-        Ok(FlacAudio { enc, bits, tail: 0 })
+        Ok(FlacAudio { enc, format, tail: 0 })
     }
 }
 
@@ -1129,7 +1137,7 @@ impl AudioEncoder for FlacAudio {
         SampleEntry::flac(&self.enc.streaminfo())
     }
     fn encode(&mut self, planar: &[Vec<f32>]) -> Result<Vec<Vec<u8>>> {
-        let ints: Vec<Vec<i32>> = planar.iter().map(|c| c.iter().map(|&s| pcm::quantise(s, self.bits)).collect()).collect();
+        let ints: Vec<Vec<i32>> = planar.iter().map(|c| c.iter().map(|&s| self.format.quantise(s)).collect()).collect();
         let refs: Vec<&[i32]> = ints.iter().map(Vec::as_slice).collect();
         self.enc.encode_frames(&refs).map_err(|e| ExportError::Encode(format!("FLAC: {e}")))
     }
@@ -1851,12 +1859,12 @@ pub fn export(project: &Arc<Project>, seq: ItemId, settings: &ExportSettings, so
         Format::Aac => aac_out::export(project, seq, settings, range, sources, progress)?,
         Format::Wav | Format::Aiff | Format::Flac => {
             let mut a = audio_out::AudioOut::new(project.clone(), seq, settings, range)?;
-            let (ch, sr, bits) = (a.channels as u16, a.sr, settings.audio.bits);
+            let (ch, sr, fmt) = (a.channels as u16, a.sr, settings.audio.sample_format());
             let frames = a.remaining();
             // the sizes are known up front: refuse an AIFF that cannot hold them before measuring
             let mut writer = match settings.format {
                 Format::Flac => {
-                    let mut cfg = filmcraft_flac::EncoderConfig::new(sr, ch as u8, if bits >= 24 { 24 } else { 16 });
+                    let mut cfg = filmcraft_flac::EncoderConfig::new(sr, ch as u8, fmt.bits() as u8);
                     cfg.level = settings.audio.flac_level.min(8);
                     AudioWriter::Flac(Box::new(filmcraft_flac::Encoder::new(cfg).map_err(|e| ExportError::Unsupported(format!("FLAC: {e}")))?))
                 }
@@ -1864,7 +1872,7 @@ pub fn export(project: &Arc<Project>, seq: ItemId, settings: &ExportSettings, so
                 _ => AudioWriter::Pcm(pcm::PcmContainer::Aiff),
             };
             let head = match &writer {
-                AudioWriter::Pcm(c) => pcm::header(*c, ch, sr, bits, frames).map_err(ExportError::Unsupported)?,
+                AudioWriter::Pcm(c) => pcm::header(*c, ch, sr, fmt, frames).map_err(ExportError::Unsupported)?,
                 AudioWriter::Flac(enc) => enc.header(),
             };
             // one second per chunk: memory stays flat however long the range is
@@ -1885,9 +1893,9 @@ pub fn export(project: &Arc<Project>, seq: ItemId, settings: &ExportSettings, so
                 }
                 buf.clear();
                 match &mut writer {
-                    AudioWriter::Pcm(c) => pcm::encode(*c, &audio_out::interleave(&planar), bits, &mut buf),
+                    AudioWriter::Pcm(c) => pcm::encode(*c, &audio_out::interleave(&planar), fmt, &mut buf),
                     AudioWriter::Flac(enc) => {
-                        let ints: Vec<Vec<i32>> = planar.iter().map(|c| c.iter().map(|&s| pcm::quantise(s, bits)).collect()).collect();
+                        let ints: Vec<Vec<i32>> = planar.iter().map(|c| c.iter().map(|&s| fmt.quantise(s)).collect()).collect();
                         let refs: Vec<&[i32]> = ints.iter().map(Vec::as_slice).collect();
                         buf = enc.encode(&refs).map_err(|e| ExportError::Encode(format!("FLAC: {e}")))?;
                     }
@@ -1898,7 +1906,7 @@ pub fn export(project: &Arc<Project>, seq: ItemId, settings: &ExportSettings, so
                 }
             }
             match &mut writer {
-                AudioWriter::Pcm(_) => out.write_all(pcm::pad(frames, ch, bits)).map_err(io)?,
+                AudioWriter::Pcm(_) => out.write_all(pcm::pad(frames, ch, fmt)).map_err(io)?,
                 AudioWriter::Flac(enc) => {
                     out.write_all(&enc.finish()).map_err(io)?;
                     // the frame sizes and MD5 are known now: fill them into STREAMINFO

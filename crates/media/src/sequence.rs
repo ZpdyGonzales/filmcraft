@@ -221,13 +221,17 @@ impl MediaSource for ImageSequenceSource {
     }
 }
 
-/// Decode one frame file: OpenEXR and DNG camera raw as linear floats (DNG with its metadata, for
+/// Decode one frame file: OpenEXR, Radiance HDR and DNG camera raw as linear floats (DNG with its metadata, for
 /// the sequence's timing), every other format through the still decoders as RGBA8. Returns the
 /// frame, whether it has alpha, and its pixel format for the media info.
 fn decode_frame(name: &str, bytes: &[u8]) -> Result<(VideoFrame, bool, String, Option<filmcraft_dng::Info>)> {
     if crate::still::exr::sniff(bytes) {
         let d = crate::still::exr::decode(name, bytes)?;
         return Ok((d.frame, d.has_alpha, d.pixel_format, None));
+    }
+    if crate::still::hdr::sniff(bytes) {
+        let frame = crate::still::hdr::decode(name, bytes)?;
+        return Ok((frame, false, "RGB 32-bit float (RGBE)".to_string(), None));
     }
     if crate::still::dng::sniff(bytes) {
         let d = crate::still::dng::decode(name, bytes)?;

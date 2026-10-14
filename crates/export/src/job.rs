@@ -363,18 +363,9 @@ impl Exporter {
                 }
             }
             None => {
-                let bps = if self.settings.audio.bits >= 24 { 3 } else { 2 };
-                let mut pcm = Vec::with_capacity(n * buf.len() * bps);
-                for i in 0..n {
-                    for c in &buf {
-                        let s = c[i].clamp(-1.0, 1.0);
-                        if bps == 3 {
-                            pcm.extend_from_slice(&((s * 8_388_607.0).round() as i32).to_le_bytes()[..3]);
-                        } else {
-                            pcm.extend_from_slice(&((s * 32767.0).round() as i16).to_le_bytes());
-                        }
-                    }
-                }
+                // little-endian, like the track's `lpcm` / `sowt` description says
+                let mut pcm = Vec::new();
+                crate::pcm::encode(crate::pcm::PcmContainer::Wav, &crate::audio_out::interleave(&buf), self.settings.audio.sample_format(), &mut pcm);
                 mux.write_sample(at, WriteSample { data: &pcm, duration: n as u32, composition_offset: 0, is_sync: true })
                     .map_err(|e| ExportError::Io(e.to_string()))?;
             }
@@ -428,8 +419,15 @@ impl Exporter {
                 Some(mux.add_track(c).map_err(|e| ExportError::Io(e.to_string()))?)
             }
             (Some(a), None) => {
-                let bits = if self.settings.audio.bits >= 24 { 24 } else { 16 };
-                let pcm = PcmConfig { bits, float: false, big_endian: false, signed: true, channels: a.channels as _, sample_rate: a.sr as f64 };
+                let f = self.settings.audio.sample_format();
+                let pcm = PcmConfig {
+                    bits: f.bits() as _,
+                    float: f.is_float(),
+                    big_endian: false,
+                    signed: true,
+                    channels: a.channels as _,
+                    sample_rate: a.sr as f64,
+                };
                 Some(mux.add_track(TrackConfig::new(SampleEntry::pcm(pcm), a.sr)).map_err(|e| ExportError::Io(e.to_string()))?)
             }
         };

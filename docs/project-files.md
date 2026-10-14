@@ -362,6 +362,11 @@ destination?, preset?}` (Project Settings ▸ Ingest) acts on every `file.import
 - **createProxies** makes proxies in the background and attaches them;
 - **copyAndCreateProxies** does both.
 
+Copied files keep their names when available; collisions receive a numbered suffix before the
+extension (`A001 2.mov`) and never replace an existing file. Transcodes reserve distinct output
+names for every clip in the import batch. Copies keep their source fingerprint, and each proxy
+stays attached to its corresponding take.
+
 `file.import` reports this under `ingest`.
 
 ## Project Manager

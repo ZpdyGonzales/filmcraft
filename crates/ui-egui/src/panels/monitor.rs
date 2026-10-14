@@ -295,10 +295,15 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, which: Which)
         monitor_view::zoom_pan_input(app, ui, which, video_area, pic, display_w, ppp);
     }
     if which == Which::Program && show_picture {
-        eyedropper(app, ui, &pic_resp, pic, target, rate, time);
-        crate::panels::graphics::monitor_overlay(app, ui, pic, frame_size);
-        crate::panels::masks::monitor_overlay(app, ui, pic, frame_size);
-        crate::panels::transform_handles::monitor_overlay(app, ui, pic, frame_size);
+        // an armed eyedropper owns clicks on the picture: the overlays would sit on top and take
+        // them (the selected clip's transform handles cover it, #1023)
+        if app.ui.eyedropper.is_some() {
+            eyedropper(app, ui, &pic_resp, pic, target, rate, time);
+        } else {
+            crate::panels::graphics::monitor_overlay(app, ui, pic, frame_size);
+            crate::panels::masks::monitor_overlay(app, ui, pic, frame_size);
+            crate::panels::transform_handles::monitor_overlay(app, ui, pic, frame_size);
+        }
     }
     if show_picture {
         monitor_view::guides(app, ui, which, video_area, pic, frame_size);
