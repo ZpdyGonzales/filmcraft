@@ -581,6 +581,8 @@ impl Drop for Session {
 /// What a driver's encoder offers for one profile (EncSlice).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EncodeCaps {
+    /// VA-API entrypoint selected for this encoder.
+    pub entrypoint: ffi::VAEntrypoint,
     /// `VA_RC_*` modes it takes.
     pub rate_control: u32,
     /// Largest picture, when the driver says.
@@ -598,14 +600,28 @@ pub fn encode_caps(profile: ffi::VAProfile) -> Result<EncodeCaps, String> {
     ];
     // SAFETY: `dpy` is initialised; `a` holds 3 live attributes for the driver to fill in. An
     // entrypoint the driver lacks for the profile is reported as an error status.
-    let st = unsafe { (d.api.get_config_attributes)(d.dpy, profile, ffi::VAEntrypointEncSliceLP, a.as_mut_ptr(), 3) };
-    d.check(st, "vaGetConfigAttributes (encode)")?;
+    let mut selected = None;
+    for entrypoint in [ffi::VAEntrypointEncSlice, ffi::VAEntrypointEncSliceLP] {
+        let st = unsafe {
+            (d.api.get_config_attributes)(d.dpy, profile, entrypoint, a.as_mut_ptr(), 3)
+        };
+        if d.check(st, "vaGetConfigAttributes (encode)").is_ok() {
+            let rc = a[0].value;
+            if rc != ffi::VA_ATTRIB_NOT_SUPPORTED
+                && rc & (ffi::VA_RC_CBR | ffi::VA_RC_VBR) != 0
+            {
+                selected = Some(entrypoint);
+                break;
+            }
+        }
+    }
+    let entrypoint = selected.ok_or_else(|| format!("profile {profile}: no supported H.264 encode entrypoint"))?;
     let [rc, w, h] = a.map(|x| x.value);
     if rc == ffi::VA_ATTRIB_NOT_SUPPORTED || rc & (ffi::VA_RC_CBR | ffi::VA_RC_VBR) == 0 {
         return Err(format!("profile {profile}: no CBR or VBR rate control ({rc:#x})"));
     }
     let known = |v: u32| v != ffi::VA_ATTRIB_NOT_SUPPORTED && v > 0;
-    Ok(EncodeCaps { rate_control: rc, max_size: (known(w) && known(h)).then_some((w, h)) })
+    Ok(EncodeCaps { entrypoint, rate_control: rc, max_size: (known(w) && known(h)).then_some((w, h)) })
 }
 
 /// A misc parameter buffer of an encode (rate control, frame rate, HRD).
@@ -645,7 +661,7 @@ pub struct EncodeSession {
 impl EncodeSession {
     /// A session for `profile` with rate control `rc` (`VA_RC_*`) at `width`×`height` (rounded up
     /// to whole macroblocks) with `recon` reconstructed-picture surfaces.
-    pub fn new(profile: ffi::VAProfile, rc: u32, width: u32, height: u32, recon: usize) -> Result<Self, String> {
+    pub fn new(profile: ffi::VAProfile, entrypoint: ffi::VAEntrypoint, rc: u32, width: u32, height: u32, recon: usize) -> Result<Self, String> {
         let (w, h) = (width.div_ceil(16).saturating_mul(16), height.div_ceil(16).saturating_mul(16));
         if w == 0 || h == 0 || w > 16384 || h > 16384 || recon == 0 || recon > 16 {
             return Err(format!("no {width}x{height} encode session with {recon} references"));
@@ -658,7 +674,7 @@ impl EncodeSession {
         ];
         let mut config = ffi::VA_INVALID_ID;
         // SAFETY: `dpy` is initialised; `attr` holds 2 live attributes; `config` is a live output.
-        let st = unsafe { (api.create_config)(dpy, profile, ffi::VAEntrypointEncSliceLP, attr.as_mut_ptr(), 2, &mut config) };
+        let st = unsafe { (api.create_config)(dpy, profile, entrypoint, attr.as_mut_ptr(), 2, &mut config) };
         display.check(st, "vaCreateConfig (encode)")?;
         // From here on `Drop` releases what was made.
         let mut s = Self {

@@ -7,10 +7,13 @@ use filmcraft_platform::vaapi::va::{EncodeSession, encode_caps};
 
 #[test]
 fn h264_encode_caps_and_a_session() {
-    let caps = match encode_caps(ffi::VAProfileH264High).or_else(|_| encode_caps(ffi::VAProfileH264Main)) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("SKIPPED: no VA-API H.264 encoder: {e}");
+    let selected = [ffi::VAProfileH264High, ffi::VAProfileH264Main]
+        .into_iter()
+        .find_map(|profile| encode_caps(profile).ok().map(|caps| (profile, caps)));
+    let (profile, caps) = match selected {
+        Some(c) => c,
+        None => {
+            eprintln!("SKIPPED: no VA-API H.264 encoder");
             return;
         }
     };
@@ -19,7 +22,7 @@ fn h264_encode_caps_and_a_session() {
         assert!(w >= 1920 && h >= 1080, "max encode size {w}x{h}");
     }
     let rc = if caps.rate_control & ffi::VA_RC_VBR != 0 { ffi::VA_RC_VBR } else { ffi::VA_RC_CBR };
-    let mut s = EncodeSession::new(ffi::VAProfileH264Main, rc, 1918, 1078, 2).expect("session");
+    let mut s = EncodeSession::new(profile, caps.entrypoint, rc, 1918, 1078, 2).expect("session");
     assert_eq!(s.coded_size(), (1920, 1088), "macroblock-aligned");
     assert_eq!(s.recon_count(), 2);
     assert!(s.recon(0).is_some() && s.recon(1).is_some() && s.recon(2).is_none());

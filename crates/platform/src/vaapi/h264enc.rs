@@ -37,6 +37,7 @@ const DEFAULT_MAX_SIZE: (u32, u32) = (4096, 4096);
 /// What the encoder was asked to do.
 #[derive(Clone, Debug)]
 pub(crate) struct Config {
+    pub(crate) entrypoint: ffi::VAEntrypoint,
     pub(crate) width: u32,
     pub(crate) height: u32,
     pub(crate) fps: (u32, u32),
@@ -96,7 +97,7 @@ pub(crate) fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &Export
     let auto = filmcraft_h264enc::nal::pick_level(w.div_ceil(16), h.div_ceil(16), fps, 1, Some(max_kbps), high);
     let level = s.h264_level.map_or(auto, |l| filmcraft_h264enc::nal::level_at_least(l, auto));
     let sar = s.pixel_aspect.map_or((1, 1), |(n, d)| (n.clamp(1, 65535) as u16, d.clamp(1, 65535) as u16));
-    Ok(Config { width: w, height: h, fps: (num, den), kbps, max_kbps, cbr, keyint, profile: s.h264_profile, level, sar })
+    Ok(Config { entrypoint: caps.entrypoint, width: w, height: h, fps: (num, den), kbps, max_kbps, cbr, keyint, profile: s.h264_profile, level, sar })
 }
 
 /// `VAEncSequenceParameterBufferH264::seq_fields`: 4:2:0, frame pictures only, direct 8×8
@@ -229,7 +230,7 @@ pub struct VaH264Encoder {
 impl VaH264Encoder {
     fn new(cfg: Config) -> std::result::Result<Self, String> {
         let rc = if cfg.cbr { ffi::VA_RC_CBR } else { ffi::VA_RC_VBR };
-        let session = EncodeSession::new(va_profile(cfg.profile), rc, cfg.width, cfg.height, RECON)?;
+        let session = EncodeSession::new(va_profile(cfg.profile), cfg.entrypoint, rc, cfg.width, cfg.height, RECON)?;
         let (cw, ch) = session.coded_size();
         let (sps, pps) = parameter_sets(&cfg, cw, ch);
         Ok(Self { session, cfg, sps, pps, frame_num: 0, idr_pic_id: 0, gop_index: 0, prev: None, y: Vec::new(), u: Vec::new(), v: Vec::new() })
@@ -456,7 +457,7 @@ mod tests {
     use filmcraft_export::{BitrateMode, ExportSettings, FieldOrder, Format, H264Pass, H264Profile, HardwareEncoding};
     use filmcraft_time::FrameRate;
 
-    const CAPS: EncodeCaps = EncodeCaps { rate_control: ffi::VA_RC_CBR | ffi::VA_RC_VBR, max_size: Some((4096, 4096)) };
+    const CAPS: EncodeCaps = EncodeCaps { entrypoint: ffi::VAEntrypointEncSlice, rate_control: ffi::VA_RC_CBR | ffi::VA_RC_VBR, max_size: Some((4096, 4096)) };
 
     fn auto() -> ExportSettings {
         ExportSettings { format: Format::H264, hardware_encoding: HardwareEncoding::Auto, bitrate_kbps: 20_000, ..Default::default() }
