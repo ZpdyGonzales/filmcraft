@@ -530,6 +530,7 @@ pub const VAConfigAttribMaxPictureHeight: VAConfigAttribType = 19;
 pub const VA_ATTRIB_NOT_SUPPORTED: u32 = 0x8000_0000;
 pub const VA_RC_CBR: u32 = 0x0000_0002;
 pub const VA_RC_VBR: u32 = 0x0000_0004;
+pub const VA_RC_CQP: u32 = 0x0000_0010;
 
 pub const VAEncCodedBufferType: VABufferType = 21;
 pub const VAEncSequenceParameterBufferType: VABufferType = 22;

@@ -608,7 +608,7 @@ pub fn encode_caps(profile: ffi::VAProfile) -> Result<EncodeCaps, String> {
         if d.check(st, "vaGetConfigAttributes (encode)").is_ok() {
             let rc = a[0].value;
             if rc != ffi::VA_ATTRIB_NOT_SUPPORTED
-                && rc & (ffi::VA_RC_CBR | ffi::VA_RC_VBR) != 0
+                && rc & (ffi::VA_RC_CBR | ffi::VA_RC_VBR | ffi::VA_RC_CQP) != 0
             {
                 selected = Some(entrypoint);
                 break;
@@ -617,8 +617,8 @@ pub fn encode_caps(profile: ffi::VAProfile) -> Result<EncodeCaps, String> {
     }
     let entrypoint = selected.ok_or_else(|| format!("profile {profile}: no supported H.264 encode entrypoint"))?;
     let [rc, w, h] = a.map(|x| x.value);
-    if rc == ffi::VA_ATTRIB_NOT_SUPPORTED || rc & (ffi::VA_RC_CBR | ffi::VA_RC_VBR) == 0 {
-        return Err(format!("profile {profile}: no CBR or VBR rate control ({rc:#x})"));
+    if rc == ffi::VA_ATTRIB_NOT_SUPPORTED || rc & (ffi::VA_RC_CBR | ffi::VA_RC_VBR | ffi::VA_RC_CQP) == 0 {
+        return Err(format!("profile {profile}: no CBR, VBR or CQP rate control ({rc:#x})"));
     }
     let known = |v: u32| v != ffi::VA_ATTRIB_NOT_SUPPORTED && v > 0;
     Ok(EncodeCaps { entrypoint, rate_control: rc, max_size: (known(w) && known(h)).then_some((w, h)) })

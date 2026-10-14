@@ -44,6 +44,7 @@ pub(crate) struct Config {
     pub(crate) kbps: u32,
     pub(crate) max_kbps: u32,
     pub(crate) cbr: bool,
+    pub(crate) rc: u32,
     pub(crate) keyint: u32,
     pub(crate) profile: H264Profile,
     pub(crate) level: u8,
@@ -77,10 +78,15 @@ pub(crate) fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &Export
         return Err("interlaced output".into());
     }
     let cbr = s.bitrate_mode == BitrateMode::Cbr;
-    let rc = if cbr { ffi::VA_RC_CBR } else { ffi::VA_RC_VBR };
-    if caps.rate_control & rc == 0 {
-        return Err(format!("the GPU's encoder has no {} rate control", if cbr { "CBR" } else { "VBR" }));
-    }
+    let requested_rc = if cbr { ffi::VA_RC_CBR } else { ffi::VA_RC_VBR };
+    let rc = if caps.rate_control & requested_rc != 0 {
+        requested_rc
+    } else if caps.rate_control & ffi::VA_RC_CQP != 0 {
+        ffi::VA_RC_CQP
+    } else {
+        return Err(format!("the GPU's encoder has no {} or CQP rate control",
+            if cbr { "CBR" } else { "VBR" }));
+    };
     let (mw, mh) = caps.max_size.unwrap_or(DEFAULT_MAX_SIZE);
     if w == 0 || h == 0 || w > mw || h > mh {
         return Err(format!("{w}x{h} (the GPU encodes up to {mw}x{mh})"));
@@ -97,7 +103,7 @@ pub(crate) fn config(format: Format, w: u32, h: u32, rate: FrameRate, s: &Export
     let auto = filmcraft_h264enc::nal::pick_level(w.div_ceil(16), h.div_ceil(16), fps, 1, Some(max_kbps), high);
     let level = s.h264_level.map_or(auto, |l| filmcraft_h264enc::nal::level_at_least(l, auto));
     let sar = s.pixel_aspect.map_or((1, 1), |(n, d)| (n.clamp(1, 65535) as u16, d.clamp(1, 65535) as u16));
-    Ok(Config { entrypoint: caps.entrypoint, width: w, height: h, fps: (num, den), kbps, max_kbps, cbr, keyint, profile: s.h264_profile, level, sar })
+    Ok(Config { entrypoint: caps.entrypoint, width: w, height: h, fps: (num, den), kbps, max_kbps, cbr, rc, keyint, profile: s.h264_profile, level, sar })
 }
 
 /// `VAEncSequenceParameterBufferH264::seq_fields`: 4:2:0, frame pictures only, direct 8×8
@@ -229,7 +235,7 @@ pub struct VaH264Encoder {
 
 impl VaH264Encoder {
     fn new(cfg: Config) -> std::result::Result<Self, String> {
-        let rc = if cfg.cbr { ffi::VA_RC_CBR } else { ffi::VA_RC_VBR };
+        let rc = cfg.rc;
         let session = EncodeSession::new(va_profile(cfg.profile), cfg.entrypoint, rc, cfg.width, cfg.height, RECON)?;
         let (cw, ch) = session.coded_size();
         let (sps, pps) = parameter_sets(&cfg, cw, ch);
@@ -369,7 +375,13 @@ impl VaH264Encoder {
                 data: ffi::VAEncMiscParameterHRD { buffer_size: peak.saturating_mul(2), initial_buffer_fullness: peak, ..Default::default() },
             }),
         ];
-        let bytes = self.session.encode_h264(&H264Picture { sequence: idr.then_some((&seq, &misc[..])), picture: &picture, slice: &slice })?;
+        // CQP uses the picture/slice QP, not bitrate or HRD controls.
+        let active_misc: &[Misc] = if cfg.rc == ffi::VA_RC_CQP {
+            &misc[1..2]
+        } else {
+            &misc[..]
+        };
+        let bytes = self.session.encode_h264(&H264Picture { sequence: idr.then_some((&seq, active_misc)), picture: &picture, slice: &slice })?;
         // this picture is the next one's reference
         self.prev = Some((slot, self.frame_num, poc));
         self.frame_num = (self.frame_num + 1) % (1 << LOG2_MAX_FRAME_NUM);
@@ -443,6 +455,9 @@ pub fn factory(format: Format, w: u32, h: u32, rate: FrameRate, s: &ExportSettin
     };
     match VaH264Encoder::new(cfg) {
         Ok(enc) => {
+            if enc.cfg.rc == ffi::VA_RC_CQP {
+                log::warn!("VA-API H.264 using CQP (QP=26); requested target bitrate is ignored");
+            }
             log::info!("hardware H.264 encoding through VA-API ({w}x{h})");
             filmcraft_export::note_hw_encode_session();
             Some(Ok(Box::new(enc)))
@@ -474,6 +489,42 @@ mod tests {
         assert_eq!(c.keyint, 60, "two seconds by default");
         assert!(!c.cbr);
         assert!(c.max_kbps >= c.kbps);
+    }
+
+    #[test]
+    fn cqp_fallback_and_rate_control_selection() {
+        let cqp_only = EncodeCaps {
+            rate_control: ffi::VA_RC_CQP,
+            ..CAPS
+        };
+
+        let c = config(
+            Format::H264, 1920, 1080,
+            FrameRate::FPS_30, &auto(), &cqp_only
+        ).unwrap();
+        assert_eq!(c.rc, ffi::VA_RC_CQP);
+
+        let cbr_settings = ExportSettings {
+            bitrate_mode: BitrateMode::Cbr,
+            ..auto()
+        };
+        let c = config(
+            Format::H264, 1920, 1080,
+            FrameRate::FPS_30, &cbr_settings, &cqp_only
+        ).unwrap();
+        assert_eq!(c.rc, ffi::VA_RC_CQP);
+
+        assert_eq!(cfg(&auto(), 1920, 1080).unwrap().rc, ffi::VA_RC_VBR);
+        assert_eq!(cfg(&cbr_settings, 1920, 1080).unwrap().rc, ffi::VA_RC_CBR);
+
+        let unsupported = EncodeCaps {
+            rate_control: 0,
+            ..CAPS
+        };
+        assert!(config(
+            Format::H264, 1920, 1080,
+            FrameRate::FPS_30, &auto(), &unsupported
+        ).is_err());
     }
 
     #[test]

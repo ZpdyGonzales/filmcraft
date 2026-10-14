@@ -17,11 +17,17 @@ fn h264_encode_caps_and_a_session() {
             return;
         }
     };
-    assert!(caps.rate_control & (ffi::VA_RC_CBR | ffi::VA_RC_VBR) != 0, "CBR or VBR: {caps:?}");
+    assert!(caps.rate_control & (ffi::VA_RC_CBR | ffi::VA_RC_VBR | ffi::VA_RC_CQP) != 0, "CBR, VBR or CQP: {caps:?}");
     if let Some((w, h)) = caps.max_size {
         assert!(w >= 1920 && h >= 1080, "max encode size {w}x{h}");
     }
-    let rc = if caps.rate_control & ffi::VA_RC_VBR != 0 { ffi::VA_RC_VBR } else { ffi::VA_RC_CBR };
+    let rc = if caps.rate_control & ffi::VA_RC_VBR != 0 {
+        ffi::VA_RC_VBR
+    } else if caps.rate_control & ffi::VA_RC_CBR != 0 {
+        ffi::VA_RC_CBR
+    } else {
+        ffi::VA_RC_CQP
+    };
     let mut s = EncodeSession::new(profile, caps.entrypoint, rc, 1918, 1078, 2).expect("session");
     assert_eq!(s.coded_size(), (1920, 1088), "macroblock-aligned");
     assert_eq!(s.recon_count(), 2);
