@@ -522,6 +522,7 @@ pub type vaGetDisplayDRM = unsafe extern "C" fn(fd: c_int) -> VADisplay;
 // ---- encoding (va.h misc / coded buffers, va_enc_h264.h)
 
 pub const VAEntrypointEncSlice: VAEntrypoint = 6;
+pub const VAEntrypointEncSliceLP: VAEntrypoint = 8;
 pub const VAConfigAttribRateControl: VAConfigAttribType = 5;
 pub const VAConfigAttribMaxPictureWidth: VAConfigAttribType = 18;
 pub const VAConfigAttribMaxPictureHeight: VAConfigAttribType = 19;

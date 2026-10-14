@@ -598,7 +598,7 @@ pub fn encode_caps(profile: ffi::VAProfile) -> Result<EncodeCaps, String> {
     ];
     // SAFETY: `dpy` is initialised; `a` holds 3 live attributes for the driver to fill in. An
     // entrypoint the driver lacks for the profile is reported as an error status.
-    let st = unsafe { (d.api.get_config_attributes)(d.dpy, profile, ffi::VAEntrypointEncSlice, a.as_mut_ptr(), 3) };
+    let st = unsafe { (d.api.get_config_attributes)(d.dpy, profile, ffi::VAEntrypointEncSliceLP, a.as_mut_ptr(), 3) };
     d.check(st, "vaGetConfigAttributes (encode)")?;
     let [rc, w, h] = a.map(|x| x.value);
     if rc == ffi::VA_ATTRIB_NOT_SUPPORTED || rc & (ffi::VA_RC_CBR | ffi::VA_RC_VBR) == 0 {
@@ -658,7 +658,7 @@ impl EncodeSession {
         ];
         let mut config = ffi::VA_INVALID_ID;
         // SAFETY: `dpy` is initialised; `attr` holds 2 live attributes; `config` is a live output.
-        let st = unsafe { (api.create_config)(dpy, profile, ffi::VAEntrypointEncSlice, attr.as_mut_ptr(), 2, &mut config) };
+        let st = unsafe { (api.create_config)(dpy, profile, ffi::VAEntrypointEncSliceLP, attr.as_mut_ptr(), 2, &mut config) };
         display.check(st, "vaCreateConfig (encode)")?;
         // From here on `Drop` releases what was made.
         let mut s = Self {
