@@ -2192,6 +2192,7 @@ dependencies = [
  "objc2-core-media",
  "objc2-core-video",
  "objc2-video-toolbox",
+ "rayon",
  "windows 0.62.2",
 ]
 
