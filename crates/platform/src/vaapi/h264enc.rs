@@ -222,9 +222,6 @@ pub struct VaH264Encoder {
     gop_index: u32,
     /// The previous picture: (recon slot, frame_num, POC), the next picture's reference.
     prev: Option<(usize, u32, i32)>,
-    y: Vec<u8>,
-    u: Vec<u8>,
-    v: Vec<u8>,
 }
 
 impl VaH264Encoder {
@@ -233,7 +230,7 @@ impl VaH264Encoder {
         let session = EncodeSession::new(va_profile(cfg.profile), cfg.entrypoint, rc, cfg.width, cfg.height, RECON)?;
         let (cw, ch) = session.coded_size();
         let (sps, pps) = parameter_sets(&cfg, cw, ch);
-        Ok(Self { session, cfg, sps, pps, frame_num: 0, idr_pic_id: 0, gop_index: 0, prev: None, y: Vec::new(), u: Vec::new(), v: Vec::new() })
+        Ok(Self { session, cfg, sps, pps, frame_num: 0, idr_pic_id: 0, gop_index: 0, prev: None })
     }
 
     fn cabac(&self) -> bool {
@@ -400,9 +397,8 @@ impl VideoEncoder for VaH264Encoder {
         if f.rgba.len() < w.saturating_mul(h).saturating_mul(4) {
             return Err(ExportError::Encode(format!("VA-API: a {}-byte RGBA picture for {w}x{h}", f.rgba.len())));
         }
-        filmcraft_export::rgba_to_yuv420_8(f.rgba, w, h, &mut self.y, &mut self.u, &mut self.v);
         let fail = |e: String| ExportError::Encode(format!("VA-API: {e} (turn Export ▸ Hardware encoding off to use the software encoder)"));
-        self.session.upload(&self.y, &self.u, &self.v, w, h).map_err(fail)?;
+        filmcraft_export::timed(filmcraft_export::Stage::Convert, || self.session.upload_rgba(f.rgba, w, h)).map_err(fail)?;
         let (bytes, key) = self.encode_picture().map_err(fail)?;
         let data = sample(&bytes, key);
         if data.is_empty() {

@@ -744,8 +744,43 @@ impl EncodeSession {
         Ok(image)
     }
 
-    /// Copy a planar 8-bit 4:2:0 picture (`w`×`h`, tight planes) into the input surface,
-    /// replicating the right / bottom edges into the macroblock padding.
+    /// Convert RGBA8 directly into the padded VA-API NV12 input image.
+    pub fn upload_rgba(&mut self, rgba: &[u8], w: usize, h: usize) -> Result<(), String> {
+        let input = *self.surfaces.first().ok_or("no input surface")?;
+        let image = self.image()?;
+        let api = self.display.api;
+        let mut ptr: *mut c_void = std::ptr::null_mut();
+
+        let st = unsafe { (api.map_buffer)(self.display.dpy, image.buf, &mut ptr) };
+        self.display.check(st, "vaMapBuffer (RGBA upload)")?;
+
+        let filled = if ptr.is_null() {
+            Err("vaMapBuffer returned no data".to_string())
+        } else {
+            let data = unsafe { std::slice::from_raw_parts_mut(ptr.cast::<u8>(), image.data_size as usize) };
+            let [p0, p1, _] = image.pitches;
+            let [o0, o1, _] = image.offsets;
+            nv12::fill_rgba(data, [p0, p1], [o0, o1], rgba, w, h, self.size.0 as usize, self.size.1 as usize)
+        };
+
+        // SAFETY: The mapped image buffer is no longer accessed after this call.
+        let st = unsafe { (api.unmap_buffer)(self.display.dpy, image.buf) };
+        let unmapped = self.display.check(st, "vaUnmapBuffer (RGBA upload)");
+
+        match (filled, unmapped) {
+            (Err(fill_error), Err(unmap_error)) => {
+                return Err(format!("{fill_error}; additionally: {unmap_error}"));
+            }
+            (Err(error), _) | (_, Err(error)) => return Err(error),
+            (Ok(()), Ok(())) => {}
+        }
+
+        let (sw, sh) = self.size;
+        let st = unsafe { (api.put_image)(self.display.dpy, input, image.image_id, 0, 0, sw, sh, 0, 0, sw, sh) };
+        self.display.check(st, "vaPutImage (RGBA upload)")
+    }
+
+    /// Copy planar 8-bit 4:2:0 into the padded NV12 input image.
     pub fn upload(&mut self, y: &[u8], u: &[u8], v: &[u8], w: usize, h: usize) -> Result<(), String> {
         let input = *self.surfaces.first().ok_or("no input surface")?;
         let image = self.image()?;
