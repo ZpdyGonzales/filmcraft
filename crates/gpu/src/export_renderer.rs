@@ -145,8 +145,8 @@ impl ExportRenderer {
                 if device_failed() {
                     return None;
                 }
-                let prep = prepare(&plan);
-                let (w, h, px) = self.compositor.render_export_prepared(&plan, Some(&prep))?;
+                let prep = prepare(plan);
+                let (w, h, px) = self.compositor.render_export_prepared(plan, Some(&prep))?;
                 // an error reported while this frame was drawn leaves its pixels untrusted
                 if device_failed() {
                     return None;
