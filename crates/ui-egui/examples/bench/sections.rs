@@ -29,6 +29,17 @@ fn gpu_export_frame_renderer_factory() -> Option<Box<dyn filmcraft_export::Frame
         ) -> Option<filmcraft_render::Image> {
             self.0.render(project, seq, t, opts, sources)
         }
+
+        fn render_rgba8(
+            &mut self,
+            project: &filmcraft_project::Project,
+            seq: ItemId,
+            t: Tick,
+            opts: filmcraft_render::RenderOptions,
+            sources: &dyn filmcraft_render::SourceProvider,
+        ) -> Option<(u32, u32, Vec<u8>)> {
+            self.0.render_rgba8(project, seq, t, opts, sources)
+        }
     }
     filmcraft_gpu::ExportRenderer::new().map(|r| Box::new(R(r)) as Box<dyn filmcraft_export::FrameRenderer>)
 }
@@ -471,6 +482,7 @@ pub fn export(o: &Opts) -> Vec<Value> {
         let mut frames = 0i64;
         let hw0 = filmcraft_engine::export::hw_encode_stats();
         let gpu0 = filmcraft_engine::export::gpu_render_stats();
+        let rgba8_0 = filmcraft_export::rgba8_fast_frames();
         // The engine's headless session does not register the app's GPU export renderer; the bench
         // does it here so `--gpu-rendering auto` measures the GPU path (and the row reports the
         // frames it actually rendered on the GPU).
@@ -547,6 +559,7 @@ pub fn export(o: &Opts) -> Vec<Value> {
             // frames composited by the GPU export renderer (zero with --gpu-rendering off or where there is no adapter)
             "gpu_frames": filmcraft_engine::export::gpu_render_stats().frames.saturating_sub(gpu0.frames),
             "gpu_fallbacks": filmcraft_engine::export::gpu_render_stats().fallbacks.saturating_sub(gpu0.fallbacks),
+            "rgba8_fast_frames": filmcraft_export::rgba8_fast_frames().saturating_sub(rgba8_0),
         }));
     }
     let _ = std::fs::remove_dir_all(&dir);

@@ -238,14 +238,27 @@ impl Pipeline {
             && !self.effects.timecode_overlay.enabled
             && !self.effects.video_limiter.enabled;
 
+        // Push transitions produce a Composite plan, which the RGBA8 fast path
+        // cannot render. Skip its redundant planning attempt.
+        let active_push_transition = self.project.sequence(self.seq).is_some_and(|seq| {
+            seq.video_tracks.iter().any(|track| {
+                track.enabled && track.transitions.iter().any(|transition| {
+                    transition.effect.effect == "push" && transition.range().contains(t)
+                })
+            })
+        });
+        let rgba8_fast_eligible = rgba8_fast_eligible && !active_push_transition;
+
         let pool = self.renderer.as_ref().filter(|_| !filmcraft_render::plan::is_cpu_frame(&self.project, self.seq, t));
 
         if rgba8_fast_eligible && std::env::var_os("FILMCRAFT_DISABLE_RGBA8_FASTPATH").is_none() {
             if let Some(pool) = pool {
                 let fast = pool.with(|r| r.render_rgba8(&self.project, self.seq, t, self.opts, sources)).flatten();
 
-                if let Some((w, h, rgba)) = fast.filter(|(w, h, rgba)| {
-                    *w == self.w && *h == self.h && rgba.len() == (*w as usize) * (*h as usize) * 4 && rgba.chunks_exact(4).all(|px| px[3] == 255)
+                if let Some((_w, _h, rgba)) = fast.filter(|(w, h, rgba)| {
+                    *w == self.w && *h == self.h
+                        && rgba.len() == (*w as usize) * (*h as usize) * 4
+                        && rgba.chunks_exact(4).all(|px| px[3] == 255)
                 }) {
                     note_gpu_frame();
                     crate::note_rgba8_fast_frame();
