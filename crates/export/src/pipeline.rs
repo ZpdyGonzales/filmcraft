@@ -238,9 +238,7 @@ impl Pipeline {
             Some(pool) => {
                 // Prepare the frame before acquiring a renderer to avoid pool deadlocks.
                 if pool.supports_prepared_plan {
-                    let plan = filmcraft_render::plan::plan_frame(
-                        &self.project, self.seq, t, self.opts, sources
-                    ).map_err(ExportError::Encode)?;
+                    let plan = filmcraft_render::plan::plan_frame(&self.project, self.seq, t, self.opts, sources).map_err(ExportError::Encode)?;
 
                     match &plan {
                         filmcraft_render::plan::FramePlan::Image(img) => Some(img.clone()),
@@ -537,7 +535,14 @@ mod renderer_pool_capability_tests {
             self.prepared
         }
 
-        fn render(&mut self, _project: &Project, _seq: ItemId, _t: filmcraft_time::Tick, _opts: RenderOptions, _sources: &dyn SourceProvider) -> std::result::Result<Option<Image>, String> {
+        fn render(
+            &mut self,
+            _project: &Project,
+            _seq: ItemId,
+            _t: filmcraft_time::Tick,
+            _opts: RenderOptions,
+            _sources: &dyn SourceProvider,
+        ) -> std::result::Result<Option<Image>, String> {
             Ok(None)
         }
     }
@@ -594,7 +599,6 @@ mod failure_tests {
         assert_eq!(calls.load(std::sync::atomic::Ordering::Relaxed), 2);
     }
 
-
     struct PreparedFailureRenderer;
 
     impl FrameRenderer for PreparedFailureRenderer {
@@ -613,10 +617,7 @@ mod failure_tests {
             panic!("prepared renderer must not use ordinary render");
         }
 
-        fn render_prepared(
-            &mut self,
-            _: &filmcraft_render::plan::FramePlan,
-        ) -> std::result::Result<Option<Image>, String> {
+        fn render_prepared(&mut self, _: &filmcraft_render::plan::FramePlan) -> std::result::Result<Option<Image>, String> {
             Err("injected prepared failure".into())
         }
     }
@@ -624,27 +625,14 @@ mod failure_tests {
     #[test]
     fn prepared_renderer_error_is_not_cpu_fallback() {
         let (project, seq, sources) = crate::tests::project();
-        assert!(!filmcraft_render::plan::is_cpu_frame(
-            &project, seq, filmcraft_time::Tick::ZERO
-        ));
+        assert!(!filmcraft_render::plan::is_cpu_frame(&project, seq, filmcraft_time::Tick::ZERO));
 
-        let mut pipeline = Pipeline::new(
-            project,
-            seq,
-            &ExportSettings {
-                gpu_rendering: GpuRendering::Off,
-                ..Default::default()
-            },
-            false,
-        ).unwrap();
+        let mut pipeline = Pipeline::new(project, seq, &ExportSettings { gpu_rendering: GpuRendering::Off, ..Default::default() }, false).unwrap();
 
         pipeline.renderer = RendererPool::new(vec![Box::new(PreparedFailureRenderer)]);
 
         let error = pipeline.frame(0, &sources).unwrap_err();
-        assert!(
-            error.to_string().contains("injected prepared failure"),
-            "unexpected error: {error}"
-        );
+        assert!(error.to_string().contains("injected prepared failure"), "unexpected error: {error}");
     }
 
     struct FailedSource(MediaInfo);
@@ -664,32 +652,19 @@ mod failure_tests {
     fn failed_source_stops_prepared_render() {
         let (project, seq, mut sources) = crate::tests::project();
 
-        assert!(!filmcraft_render::plan::is_cpu_frame(
-            &project, seq, filmcraft_time::Tick::ZERO
-        ));
+        assert!(!filmcraft_render::plan::is_cpu_frame(&project, seq, filmcraft_time::Tick::ZERO));
 
         let video = project.sequence(seq).unwrap().video_tracks[0].items[0].item;
         let info = sources.0[&video].info().clone();
         sources.0.insert(video, Arc::new(FailedSource(info)));
 
-        let mut pipeline = Pipeline::new(
-            project,
-            seq,
-            &ExportSettings {
-                gpu_rendering: GpuRendering::Off,
-                ..Default::default()
-            },
-            false,
-        ).unwrap();
+        let mut pipeline = Pipeline::new(project, seq, &ExportSettings { gpu_rendering: GpuRendering::Off, ..Default::default() }, false).unwrap();
 
         pipeline.renderer = RendererPool::new(vec![Box::new(PreparedFailureRenderer)]);
 
         let error = pipeline.frame(0, &sources).unwrap_err();
 
-        assert!(
-            error.to_string().contains("injected export frame failure"),
-            "unexpected error: {error}"
-        );
+        assert!(error.to_string().contains("injected export frame failure"), "unexpected error: {error}");
     }
 
     #[test]
@@ -700,6 +675,5 @@ mod failure_tests {
         sources.0.insert(video, Arc::new(FailedSource(info)));
         let pipeline = Pipeline::new(project, seq, &ExportSettings::default(), false).unwrap();
         assert!(pipeline.frame(0, &sources).unwrap_err().to_string().contains("injected export frame failure"));
-
     }
 }
