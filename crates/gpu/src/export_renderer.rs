@@ -212,6 +212,7 @@ mod tests {
         let r = filmcraft_time::FrameRate::FPS_24;
         let _v = p.make_track_item(red, TrackKind::Video, Tick::ZERO, TimeRange::new(Tick::ZERO, r.tick_of(24)), r).unwrap();
         let a = p.make_track_item(t, TrackKind::Audio, Tick::ZERO, TimeRange::new(Tick::ZERO, r.tick_of(24)), r).unwrap();
+        p.sequence_mut(seq).unwrap().video_tracks[0].items.push(_v);
         if transform {
             // Motion + opacity as fixed effects (the way the golden transform scene does it).
             if let Some(clip) = p.sequence_mut(seq).unwrap().video_tracks[0].items.last_mut() {
@@ -232,7 +233,6 @@ mod tests {
                 }
             }
         }
-        p.sequence_mut(seq).unwrap().video_tracks[0].items.push(_v);
         p.sequence_mut(seq).unwrap().audio_tracks[0].items.push(a);
         let mut m = SourceMap::default();
         m.0.insert(red, Arc::new(g));
