@@ -322,25 +322,15 @@ mod tests {
             let t = filmcraft_time::FrameRate::FPS_24.tick_of(10);
             let opts = RenderOptions::default();
 
-            let standard = renderer
-                .render(&project, seq, t, opts, &sources)
-                .expect("standard GPU render");
+            let standard = renderer.render(&project, seq, t, opts, &sources).expect("standard GPU render");
 
             let plan = plan_frame(&project, seq, t, opts, &sources);
-            assert!(
-                matches!(plan, FramePlan::Layers { .. }),
-                "expected a nonempty GPU layer plan"
-            );
+            assert!(matches!(plan, FramePlan::Layers { .. }), "expected a nonempty GPU layer plan");
 
-            let prepared = renderer
-                .render_prepared(&plan)
-                .expect("prepared GPU render");
+            let prepared = renderer.render_prepared(&plan).expect("prepared GPU render");
 
             assert_eq!((standard.w, standard.h), (prepared.w, prepared.h));
-            assert_eq!(
-                standard.px, prepared.px,
-                "standard and prepared GPU pixels differ (transform={transform})"
-            );
+            assert_eq!(standard.px, prepared.px, "standard and prepared GPU pixels differ (transform={transform})");
         }
     }
 
