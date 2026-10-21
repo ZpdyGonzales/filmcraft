@@ -466,9 +466,11 @@ async fn cli() {
                     let written = written_paths(&v, out).join(", ");
                     check_offline(&a, &offline_media(&v), &format!("export: {written}"));
                     diag(format_args!("exported {written} in {:.1}s", t0.elapsed().as_secs_f64()));
-                    diag(format_args!("RGBA8 FASTPATH: {} kare", filmcraft_export::rgba8_fast_frames()));
-                    let gpu = filmcraft_export::gpu_render_stats();
-                    diag(format_args!("GPU FRAMES: {} | GPU FALLBACKS: {}", gpu.frames, gpu.fallbacks));
+                    if let Backend::Local(_) = &b {
+                        diag(format_args!("RGBA8 FASTPATH: {} kare", filmcraft_export::rgba8_fast_frames()));
+                        let gpu = filmcraft_export::gpu_render_stats();
+                        diag(format_args!("GPU FRAMES: {} | GPU FALLBACKS: {}", gpu.frames, gpu.fallbacks));
+                    }
                 }
                 Err(e) => fail(format!("export: {e}")),
             }

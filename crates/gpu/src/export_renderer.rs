@@ -268,6 +268,7 @@ mod tests {
         let r = filmcraft_time::FrameRate::FPS_24;
         let _v = p.make_track_item(red, TrackKind::Video, Tick::ZERO, TimeRange::new(Tick::ZERO, r.tick_of(24)), r).unwrap();
         let a = p.make_track_item(t, TrackKind::Audio, Tick::ZERO, TimeRange::new(Tick::ZERO, r.tick_of(24)), r).unwrap();
+        p.sequence_mut(seq).unwrap().video_tracks[0].items.push(_v);
         if transform {
             // Motion + opacity as fixed effects (the way the golden transform scene does it).
             if let Some(clip) = p.sequence_mut(seq).unwrap().video_tracks[0].items.last_mut() {
@@ -376,10 +377,7 @@ mod tests {
             let (project, seq, sources) = if case == "grayscale-ramp" { ramp_project() } else { project(transformed) };
             let t = Tick::ZERO;
             let plan = plan_frame(&project, seq, t, RenderOptions::default(), &sources);
-            assert!(matches!(plan, FramePlan::Layers { .. }));
-            if case == "grayscale-ramp" {
-                assert!(matches!(&plan, FramePlan::Layers { layers, .. } if !layers.is_empty()), "grayscale ramp must produce GPU layers");
-            }
+            assert!(matches!(&plan, FramePlan::Layers { layers, .. } if !layers.is_empty()), "{case} must produce GPU layers");
 
             let prep = prepare(&plan);
 
@@ -429,7 +427,7 @@ mod tests {
         for transformed in [false, true] {
             let (project, seq, sources) = project(transformed);
             let plan = plan_frame(&project, seq, Tick::ZERO, RenderOptions::default(), &sources);
-            assert!(matches!(plan, FramePlan::Layers { .. }));
+            assert!(matches!(&plan, FramePlan::Layers { layers, .. } if !layers.is_empty()), "benchmark fixture must produce GPU layers");
             let prep = prepare(&plan);
 
             for _ in 0..3 {
