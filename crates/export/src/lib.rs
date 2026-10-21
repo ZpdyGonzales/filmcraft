@@ -911,7 +911,7 @@ pub fn encoder_registered(f: EncoderFactory) -> bool {
 /// compositor (`filmcraft-gpu`), registered by the app or CLI at startup. `render` returns the
 /// frame exactly as [`filmcraft_render::render_sequence`] would (same size, premultiplied
 /// linear-light RGBA), or `None` to let the CPU render this frame (no adapter, a plan the GPU
-/// cannot draw, any internal error): the CPU renderer is the reference and the fallback.
+/// cannot draw). Terminal frame errors propagate; the CPU renderer remains the fallback.
 pub trait FrameRenderer: Send {
     /// Whether this renderer supports a frame plan prepared before acquiring it.
     fn supports_prepared_plan(&self) -> bool {
@@ -920,8 +920,8 @@ pub trait FrameRenderer: Send {
 
     /// Render a plan prepared before acquiring the renderer.
     /// Called only when supports_prepared_plan() returns true.
-    fn render_prepared(&mut self, _plan: &filmcraft_render::plan::FramePlan) -> Option<filmcraft_render::Image> {
-        None
+    fn render_prepared(&mut self, _plan: &filmcraft_render::plan::FramePlan) -> std::result::Result<Option<filmcraft_render::Image>, String> {
+        Ok(None)
     }
 
     fn render(
@@ -931,7 +931,7 @@ pub trait FrameRenderer: Send {
         t: Tick,
         opts: filmcraft_render::RenderOptions,
         sources: &dyn SourceProvider,
-    ) -> Option<filmcraft_render::Image>;
+    ) -> std::result::Result<Option<filmcraft_render::Image>, String>;
 }
 
 /// Builds the frame renderer for one export, or `None` when this host cannot (no adapter).
@@ -1959,7 +1959,7 @@ pub fn export(project: &Arc<Project>, seq: ItemId, settings: &ExportSettings, so
                 }
                 let end = (f + batch).min(f1);
                 if let Some(enc) = gif.as_mut() {
-                    let frames: Vec<Vec<u8>> = (f..end).into_par_iter().map(|fi| pipe.frame(fi, sources).0).collect();
+                    let frames: Vec<Vec<u8>> = (f..end).into_par_iter().map(|fi| pipe.frame(fi, sources).map(|f| f.0)).collect::<Result<Vec<_>>>()?;
                     for (fi, rgba) in (f..end).zip(frames) {
                         let img = image::RgbaImage::from_raw(w, h, rgba).ok_or_else(|| ExportError::Encode("frame".into()))?;
                         let delay = image::Delay::from_numer_denom_ms(u32::from(gif_delay_cs(pipe.rate, fi - f0)) * 10, 1);
@@ -1971,7 +1971,7 @@ pub fn export(project: &Arc<Project>, seq: ItemId, settings: &ExportSettings, so
                         .map(|fi| {
                             let data = encode_still_with(
                                 settings.format,
-                                pipe.frame(fi, sources).0,
+                                pipe.frame(fi, sources)?.0,
                                 w,
                                 h,
                                 settings.alpha,
