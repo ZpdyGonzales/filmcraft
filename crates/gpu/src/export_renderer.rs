@@ -232,6 +232,7 @@ mod tests {
                 }
             }
         }
+        p.sequence_mut(seq).unwrap().video_tracks[0].items.push(_v);
         p.sequence_mut(seq).unwrap().audio_tracks[0].items.push(a);
         let mut m = SourceMap::default();
         m.0.insert(red, Arc::new(g));
@@ -307,6 +308,40 @@ mod tests {
         let gpu = R(r).render(&p, seq, Tick::ZERO, RenderOptions::default(), &m).expect("rendered");
         let cpu = filmcraft_render::render_sequence(&p, seq, Tick::ZERO, RenderOptions::default(), &m);
         assert_parity(&cpu, &gpu, "frame renderer");
+    }
+
+    #[test]
+    fn prepared_render_matches_standard_render() {
+        let Some(mut renderer) = ExportRenderer::new() else {
+            eprintln!("SKIPPED (prepared render parity): no GPU adapter");
+            return;
+        };
+
+        for transform in [false, true] {
+            let (project, seq, sources) = project(transform);
+            let t = filmcraft_time::FrameRate::FPS_24.tick_of(10);
+            let opts = RenderOptions::default();
+
+            let standard = renderer
+                .render(&project, seq, t, opts, &sources)
+                .expect("standard GPU render");
+
+            let plan = plan_frame(&project, seq, t, opts, &sources);
+            assert!(
+                matches!(plan, FramePlan::Layers { .. }),
+                "expected a nonempty GPU layer plan"
+            );
+
+            let prepared = renderer
+                .render_prepared(&plan)
+                .expect("prepared GPU render");
+
+            assert_eq!((standard.w, standard.h), (prepared.w, prepared.h));
+            assert_eq!(
+                standard.px, prepared.px,
+                "standard and prepared GPU pixels differ (transform={transform})"
+            );
+        }
     }
 
     #[test]
