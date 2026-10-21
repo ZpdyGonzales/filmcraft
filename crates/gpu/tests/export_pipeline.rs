@@ -155,8 +155,12 @@ fn gpu_export_matches_cpu_and_counts() {
         }
         let _ = i;
     }
-    // Four GPU renderer instances are created for each of four exports.
-    assert_eq!(RENDERER_CREATIONS.load(std::sync::atomic::Ordering::SeqCst), 16, "expected four GPU renderers per export");
+    // Renderer pool size depends on Rayon thread count.
+    assert_eq!(
+        RENDERER_CREATIONS.load(std::sync::atomic::Ordering::SeqCst),
+        rayon::current_num_threads().clamp(2, 4) * 4,
+        "expected four GPU renderers per export"
+    );
     let GpuRenderStats { frames, .. } = filmcraft_export::gpu_render_stats();
     assert!(frames >= 8, "gpu frames counted across the parity exports: {frames}");
 }
